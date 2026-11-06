@@ -307,15 +307,24 @@ int SystemProperties::Update(prop_info* pi, const char* value, unsigned int len)
     return -1;
   }
   prop_area* pa = contexts_->GetPropAreaForName(pi->name);
+  // The overrides area holds a property under the name readers ask for, so
+  // ro.appcompat_override.ro.foo is ro.foo in there, see Add().
+  const char* override_name = pi->name;
+  if (is_appcompat_override(override_name)) override_name += strlen(APPCOMPAT_PREFIX);
   prop_area* override_pa =
-      have_override ? appcompat_override_contexts_->GetPropAreaForName(pi->name) : nullptr;
+      have_override ? appcompat_override_contexts_->GetPropAreaForName(override_name) : nullptr;
   if (__predict_false(!pa)) {
     async_safe_format_log(ANDROID_LOG_ERROR, "libc", "Could not find area for \"%s\"", pi->name);
     return -1;
   }
   CHECK(!have_override || (override_pa && override_serial_pa));
 
-  auto* override_pi = const_cast<prop_info*>(have_override ? override_pa->find(pi->name) : nullptr);
+  auto* override_pi =
+      const_cast<prop_info*>(have_override ? override_pa->find(override_name) : nullptr);
+  if (__predict_false(have_override && !override_pi)) {
+    async_safe_format_log(ANDROID_LOG_ERROR, "libc", "No override entry for \"%s\"", pi->name);
+    have_override = false;
+  }
 
   uint32_t serial = atomic_load_explicit(&pi->serial, memory_order_relaxed);
   unsigned int old_len = SERIAL_VALUE_LEN(serial);
